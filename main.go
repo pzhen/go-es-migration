@@ -119,6 +119,8 @@ type (
 
 func main() {
 	t1 := time.Now()
+
+	// 并发写文件枷锁
 	Rw = new(sync.RWMutex)
 
 	// data channel
