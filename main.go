@@ -3,15 +3,16 @@
 package main
 
 import (
-	"fmt"
-	"time"
-	"net/http"
-	"io/ioutil"
-	"encoding/json"
 	"bytes"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"math/rand"
-	"sync"
+	"net/http"
+	"os"
 	"strconv"
+	"sync"
+	"time"
 )
 
 var (
@@ -21,19 +22,19 @@ var (
 	// 目标索引
 	EsTargetIndexUser = "vmh_user_201804"
 
-	// 目标日志索引
-	EsTargetIndexErrLog = "vmh_user_201804_error_log"
-
 	//wait goroutines
 	Wg sync.WaitGroup
 
-	// goroutines number
-	ThreadsNum = 50
+	// lock
+	Rw *sync.RWMutex
 
-	RowsNum = 50
+	// goroutines number
+	ThreadsNum = 20
+
+	RowsNum = 100
 
 	// buffer
-	Buffer = 100000
+	Buffer = 1000000
 
 	// 来源机
 	EsOrgServer = []string{
@@ -73,7 +74,7 @@ type (
 			Total    int     `json:"total"`
 			MaxScore float64 `json:"max_score"`
 
-			Hits [] struct {
+			Hits []struct {
 				Index  string   `json:"_index"`
 				Type   string   `json:"_type"`
 				Id     string   `json:"_id"`
@@ -118,6 +119,7 @@ type (
 
 func main() {
 	t1 := time.Now()
+	Rw = new(sync.RWMutex)
 
 	// data channel
 	ch := make(chan UserInfo, Buffer)
@@ -126,7 +128,7 @@ func main() {
 	go Produce(ch)
 
 	// consume
-	for task := 1; task <= ThreadsNum; task ++ {
+	for task := 1; task <= ThreadsNum; task++ {
 		Wg.Add(1)
 		go Consume(ch, task)
 	}
@@ -141,6 +143,16 @@ func debugLog(args ...interface{}) {
 	if len(args) > 0 {
 		fmt.Printf("%-10v\n", args)
 	}
+}
+
+func Tracefile(str string) {
+	Rw.Lock()
+
+	fd, _ := os.OpenFile("error.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	fd.Write([]byte(str))
+	fd.Close()
+
+	Rw.Unlock()
 }
 
 // 返回来 源机 Es 对象
@@ -261,6 +273,7 @@ func Consume(ch chan UserInfo, task int) {
 		r, err := ElasticsearchTaget(EsTargetIndexUser, EsTargetIndexUser, v.UserId).ElasticsearchQuery(v)
 		if err != nil {
 			debugLog("Consume", "error", "user_id", v.UserId, err)
+			Tracefile(v.UserId + "\n")
 			continue
 		}
 
@@ -270,7 +283,6 @@ func Consume(ch chan UserInfo, task int) {
 
 		// error
 		if res.Error.Type != "" {
-			ElasticsearchTaget(EsTargetIndexErrLog, EsTargetIndexErrLog, v.UserId).ElasticsearchQuery(v)
 			debugLog("Consume", "error", "user_id", v.UserId, res.Error.Reason)
 			continue
 		}
